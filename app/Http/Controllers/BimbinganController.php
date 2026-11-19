@@ -2,105 +2,102 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Bimbingan;
+use App\Models\BimbinganDetail;
+use Illuminate\Http\Request;
 
 class BimbinganController extends Controller
 {
+    /** Ambil bimbingan hanya jika boleh dilihat user yang login, selain itu 404 */
+    private function findVisible($id, bool $withDetails = false): Bimbingan
+    {
+        $q = Bimbingan::visibleTo(auth()->user());
+        if ($withDetails) {
+            $q->with('details');
+        }
+        return $q->findOrFail($id);
+    }
+
+    private function isReviewer(): bool
+    {
+        return in_array(auth()->user()->role, ['dosen', 'kaprodi', 'admin']);
+    }
+
+    private function simpanPdf(Request $request): string
+    {
+        $file = $request->file('file_pdf');
+        $nama = time() . '_' . str_replace(' ', '_', $file->getClientOriginalName());
+        $file->move(public_path('berkas_bimbingan'), $nama);
+        return 'berkas_bimbingan/' . $nama;
+    }
+
+    private function hapusPdf(?string $path): void
+    {
+        if ($path && file_exists(public_path($path))) {
+            unlink(public_path($path));
+        }
+    }
+
     public function index()
     {
-        $user = auth()->user();
-
-        // Siapkan query dasar
-        $query = Bimbingan::latest();
-
-        if ($user->role === 'mahasiswa') {
-            // Kalau mahasiswa, cuma tampilkan data miliknya
-            $query->where('nama_mahasiswa', $user->name);
-        }
-        elseif ($user->role === 'dosen') {
-            // Kalau dosen, cuma tampilkan data yang dosen pembimbingnya adalah dia
-            $query->where('nama_dosen', $user->name);
-        }
-        // Kalau 'admin', tidak ada filter tambahan (tampilkan semua)
-
-        // Eksekusi query
-        $datas = $query->get();
-
+        $datas = Bimbingan::visibleTo(auth()->user())->with('prodi')->latest()->get();
         return view('bimbingan.index', compact('datas'));
     }
 
     public function create()
     {
-        // KUNCI: Hanya mahasiswa yang boleh buka halaman form
         if (auth()->user()->role !== 'mahasiswa') {
             abort(403, 'Akses Ditolak! Hanya Mahasiswa yang dapat membuat pengajuan.');
         }
-
         return view('bimbingan.create-bimbingan');
     }
 
     public function store(Request $request)
     {
-        // 1. Kunci Keamanan: Hanya mahasiswa yang boleh nyimpan pengajuan
-        if (auth()->user()->role !== 'mahasiswa') {
+        $user = auth()->user();
+        if ($user->role !== 'mahasiswa') {
             abort(403, 'Akses Ditolak!');
         }
 
-        $user = auth()->user();
         $dosen = $user->dosenPembimbing;
-
-        // 2. Kunci Keamanan: Pastikan mahasiswa punya dosen pembimbing
         if (!$dosen) {
             abort(403, 'Anda belum memiliki Dosen Pembimbing. Silakan hubungi Kaprodi.');
         }
 
-        // 3. Validasi PDF (Wajib PDF, Maksimal 5MB)
         $request->validate([
-            'file_pdf' => 'required|mimes:pdf|max:5120',
+            'file_pdf'        => 'required|mimes:pdf|max:5120',
+            'semester'        => 'required|string|max:10',
+            'tahun_akademik'  => 'required|string|max:20',
+            'jenis_bimbingan' => 'required|string|max:255',
         ]);
 
-        // 4. Proses Upload File Langsung ke Folder Public
-        $filePdfPath = null;
-        if ($request->hasFile('file_pdf')) {
-            $file = $request->file('file_pdf');
-            // Bikin nama file unik pakai waktu
-            $nama_file = time() . '_' . str_replace(' ', '_', $file->getClientOriginalName());
-            // Pindahkan langsung ke public/berkas_bimbingan
-            $file->move(public_path('berkas_bimbingan'), $nama_file);
-            // Simpan nama foldernya untuk di database
-            $filePdfPath = 'berkas_bimbingan/' . $nama_file;
-        }
-
-        // 5. Simpan Data Utama
         $bimbingan = Bimbingan::create([
+            'mahasiswa_id'        => $user->id,
+            'dosen_id'            => $dosen->id,
+            'prodi_id'            => $user->prodi_id,
+            // snapshot untuk dokumen cetak (nama/NIM tidak dipakai untuk akses data)
             'nama_mahasiswa'      => $user->name,
-            'nim'                 => $request->nim,
+            'nim'                 => $user->nomor_induk,
             'semester'            => $request->semester,
             'tahun_akademik'      => $request->tahun_akademik,
             'nama_dosen'          => $dosen->name,
             'nip_dosen'           => $dosen->nomor_induk ?? '-',
             'jenis_bimbingan'     => $request->jenis_bimbingan,
             'kegiatan_pengesahan' => $request->kegiatan_pengesahan,
-            'jumlah_bimbingan'    => $request->jumlah_bimbingan,
+            'jumlah_bimbingan'    => $request->jumlah_bimbingan ?? 0,
             'catatan_umum'        => $request->catatan_umum,
-
-            // Kolom baru untuk PDF dan Status
-            'file_pdf'            => $filePdfPath,
+            'file_pdf'            => $this->simpanPdf($request),
             'status'              => 'Menunggu Review',
         ]);
 
-        // 6. Simpan Data Rincian Kegiatan (Tabel bawah)
-        if ($request->has('kegiatan')) {
-            foreach ($request->kegiatan as $key => $kegiatan) {
-                \App\Models\BimbinganDetail::create([
-                    'bimbingan_id'     => $bimbingan->id,
-                    'kegiatan'         => $kegiatan,
-                    'materi_bimbingan' => $request->materi_bimbingan[$key],
-                    'saran_solusi'     => $request->saran_solusi[$key] ?? null,
-                    'keterangan'       => $request->keterangan[$key] ?? null,
-                ]);
-            }
+        foreach ((array) $request->kegiatan as $key => $kegiatan) {
+            BimbinganDetail::create([
+                'bimbingan_id'     => $bimbingan->id,
+                'kegiatan'         => $kegiatan,
+                'materi_bimbingan' => $request->materi_bimbingan[$key] ?? '',
+                'saran_solusi'     => $request->saran_solusi[$key] ?? null,
+                'keterangan'       => $request->keterangan[$key] ?? null,
+            ]);
         }
 
         return redirect()->route('bimbingan.index')->with('success', 'Pengajuan bimbingan dan berkas berhasil dikirim!');
@@ -108,69 +105,46 @@ class BimbinganController extends Controller
 
     public function cetak($id)
     {
-        $bimbingan = Bimbingan::with('details')->findOrFail($id);
-        $user = auth()->user();
-
-        // KUNCI PRIVASI:
-        // 1. Jika mahasiswa, nama di laporan harus sama dengan namanya
-        if ($user->role === 'mahasiswa' && $bimbingan->nama_mahasiswa !== $user->name) {
-            abort(403, 'Privasi: Anda tidak dapat melihat dokumen bimbingan mahasiswa lain.');
-        }
-
-        // 2. Jika dosen, nama dosen pembimbing di laporan harus sama dengan namanya
-        if ($user->role === 'dosen' && $bimbingan->nama_dosen !== $user->name) {
-            abort(403, 'Privasi: Anda tidak dapat melihat dokumen bimbingan dosen lain.');
-        }
-
+        $bimbingan = $this->findVisible($id, true);
+        $bimbingan->load('prodi');
         return view('bimbingan.cetak-bimbingan', compact('bimbingan'));
     }
 
-    // Menampilkan form review untuk Dosen
+    // Form review untuk Dosen / Kaprodi / Admin
     public function edit($id)
     {
-        // KUNCI: Cegah mahasiswa buka halaman review
-        if (!in_array(auth()->user()->role, ['dosen', 'admin'])) {
+        if (!$this->isReviewer()) {
             abort(403, 'Akses Ditolak! Hanya Dosen/Kaprodi yang dapat mereview.');
         }
-
-        $bimbingan = Bimbingan::with('details')->findOrFail($id);
-
-        // KUNCI EXTRA: Pastikan dosen cuma bisa review mahasiswa bimbingannya sendiri
-        if (auth()->user()->role === 'dosen' && $bimbingan->nama_dosen !== auth()->user()->name) {
-            abort(403, 'Akses Ditolak! Ini bukan mahasiswa bimbingan Anda.');
-        }
-
+        $bimbingan = $this->findVisible($id, true);
         return view('bimbingan.edit', compact('bimbingan'));
     }
 
-    // Memproses update data dari Dosen
     public function update(Request $request, $id)
     {
-        if (!in_array(auth()->user()->role, ['dosen', 'admin'])) {
+        if (!$this->isReviewer()) {
             abort(403, 'Akses Ditolak!');
         }
+        // findVisible memastikan dosen hanya bisa mengubah bimbingan mahasiswanya sendiri
+        $bimbingan = $this->findVisible($id);
 
-        // Mengambil data bimbingan
-        $bimbingan = Bimbingan::findOrFail($id);
+        $request->validate(['status' => 'nullable|in:Menunggu Review,Revisi,Selesai']);
 
-        // Dosen mengupdate data pengesahan, catatan umum, DAN STATUS
         $bimbingan->update([
             'kegiatan_pengesahan' => $request->kegiatan_pengesahan,
             'jumlah_bimbingan'    => $request->jumlah_bimbingan,
             'catatan_umum'        => $request->catatan_umum,
-            'status'              => $request->status ?? $bimbingan->status, // Mengambil status baru dari dosen
+            'status'              => $request->status ?? $bimbingan->status,
         ]);
 
-        // Dosen mengupdate tabel rincian (saran & solusi)
-        if ($request->has('detail_id')) {
-            foreach ($request->detail_id as $key => $detail_id) {
-                $detail = \App\Models\BimbinganDetail::find($detail_id);
-                if ($detail) {
-                    $detail->update([
-                        'saran_solusi' => $request->saran_solusi[$key],
-                        'keterangan'   => $request->keterangan[$key],
-                    ]);
-                }
+        foreach ((array) $request->detail_id as $key => $detailId) {
+            // hanya detail milik bimbingan ini
+            $detail = $bimbingan->details()->find($detailId);
+            if ($detail) {
+                $detail->update([
+                    'saran_solusi' => $request->saran_solusi[$key] ?? null,
+                    'keterangan'   => $request->keterangan[$key] ?? null,
+                ]);
             }
         }
 
@@ -179,86 +153,66 @@ class BimbinganController extends Controller
 
     // --- FITUR KHUSUS MAHASISWA ---
 
-    // 1. Menghapus Pengajuan
     public function destroy($id)
     {
-        $bimbingan = Bimbingan::findOrFail($id);
-
-        // Kunci: Hanya mahasiswa pemilik data yang boleh hapus
-        if (auth()->user()->role === 'mahasiswa' && $bimbingan->nama_mahasiswa !== auth()->user()->name) {
-            abort(403, 'Akses Ditolak!');
+        $user = auth()->user();
+        if ($user->role !== 'mahasiswa') {
+            abort(403, 'Akses Ditolak! Hanya mahasiswa pemilik yang dapat menghapus pengajuan.');
         }
 
-        // Cegah hapus kalau sudah disetujui dosen
+        $bimbingan = $this->findVisible($id);
+
         if ($bimbingan->status === 'Selesai') {
             return back()->with('error', 'Gagal: Data yang sudah di-ACC tidak bisa dihapus!');
         }
 
-        // Hapus file fisik PDF dari folder public
-        if ($bimbingan->file_pdf && file_exists(public_path($bimbingan->file_pdf))) {
-            unlink(public_path($bimbingan->file_pdf));
-        }
-
+        $this->hapusPdf($bimbingan->file_pdf);
         $bimbingan->delete();
+
         return back()->with('success', 'Pengajuan bimbingan berhasil dihapus.');
     }
 
-    // 2. Menampilkan Form Edit Mahasiswa
     public function editMahasiswa($id)
     {
-        $bimbingan = Bimbingan::with('details')->findOrFail($id);
-
-        if (auth()->user()->role !== 'mahasiswa' || $bimbingan->nama_mahasiswa !== auth()->user()->name) {
+        if (auth()->user()->role !== 'mahasiswa') {
             abort(403, 'Akses Ditolak!');
         }
+        $bimbingan = $this->findVisible($id, true);
+
+        if ($bimbingan->status === 'Selesai') {
+            return back()->with('error', 'Data yang sudah di-ACC tidak bisa diedit lagi!');
+        }
+        return view('bimbingan.edit-mahasiswa', compact('bimbingan'));
+    }
+
+    public function updateMahasiswa(Request $request, $id)
+    {
+        if (auth()->user()->role !== 'mahasiswa') {
+            abort(403, 'Akses Ditolak!');
+        }
+        $bimbingan = $this->findVisible($id);
 
         if ($bimbingan->status === 'Selesai') {
             return back()->with('error', 'Data yang sudah di-ACC tidak bisa diedit lagi!');
         }
 
-        return view('bimbingan.edit-mahasiswa', compact('bimbingan'));
-    }
-
-    // 3. Memproses Update dari Mahasiswa (Upload Ulang Revisi)
-    public function updateMahasiswa(Request $request, $id)
-    {
-        $bimbingan = Bimbingan::findOrFail($id);
-
-        if (auth()->user()->role !== 'mahasiswa' || $bimbingan->nama_mahasiswa !== auth()->user()->name) {
-            abort(403, 'Akses Ditolak!');
-        }
-
-        // Upload PDF baru JIKA ADA yang diupload
         if ($request->hasFile('file_pdf')) {
             $request->validate(['file_pdf' => 'mimes:pdf|max:5120']);
-
-            // Hapus PDF Lama
-            if ($bimbingan->file_pdf && file_exists(public_path($bimbingan->file_pdf))) {
-                unlink(public_path($bimbingan->file_pdf));
-            }
-
-            // Simpan PDF Baru
-            $file = $request->file('file_pdf');
-            $nama_file = time() . '_' . str_replace(' ', '_', $file->getClientOriginalName());
-            $file->move(public_path('berkas_bimbingan'), $nama_file);
-            $bimbingan->file_pdf = 'berkas_bimbingan/' . $nama_file;
+            $this->hapusPdf($bimbingan->file_pdf);
+            $bimbingan->file_pdf = $this->simpanPdf($request);
         }
 
-        // Update Data Utama
         $bimbingan->jenis_bimbingan = $request->jenis_bimbingan;
-        $bimbingan->status = 'Menunggu Review'; // 🟢 Otomatis kembali ke status Menunggu saat diedit
+        $bimbingan->status = 'Menunggu Review';
         $bimbingan->save();
 
-        // Update rincian kegiatannya
-        if ($request->has('detail_id')) {
-            foreach ($request->detail_id as $key => $detail_id) {
-                $detail = \App\Models\BimbinganDetail::find($detail_id);
-                if ($detail) {
-                    $detail->update([
-                        'kegiatan' => $request->kegiatan[$key],
-                        'materi_bimbingan' => $request->materi_bimbingan[$key],
-                    ]);
-                }
+        foreach ((array) $request->detail_id as $key => $detailId) {
+            $detail = $bimbingan->details()->find($detailId);
+            if ($detail) {
+                $detail->update([
+                    'kegiatan'         => $request->kegiatan[$key],
+                    'materi_bimbingan' => $request->materi_bimbingan[$key],
+                ]);
             }
         }
 

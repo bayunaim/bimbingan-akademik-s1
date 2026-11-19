@@ -12,38 +12,26 @@ Route::get('/', function () {
 Route::get('/dashboard', function () {
     $user = auth()->user();
 
-    // Siapkan wadah variabel
-    $totalBimbingan = 0;
-    $bimbinganTerbaru = collect();
-    $totalDosen = 0;
-    $totalMahasiswa = 0;
-    $menungguReview = 0;
-    $selesaiReview = 0;
-    $mahasiswas = collect(); // Wadah untuk daftar mahasiswa bimbingan dosen
+    $base = \App\Models\Bimbingan::visibleTo($user);
 
-    if ($user->role === 'admin') {
-        $totalBimbingan = \App\Models\Bimbingan::count();
-        $totalDosen = \App\Models\User::where('role', 'dosen')->count();
-        $totalMahasiswa = \App\Models\User::where('role', 'mahasiswa')->count();
-        $bimbinganTerbaru = \App\Models\Bimbingan::latest()->take(5)->get();
-    }
-    elseif ($user->role === 'dosen') {
-        $totalBimbingan = \App\Models\Bimbingan::where('nama_dosen', $user->name)->count();
-        $menungguReview = \App\Models\Bimbingan::where('nama_dosen', $user->name)->whereIn('status', ['Menunggu Review', 'Revisi'])->count();
-        $selesaiReview = \App\Models\Bimbingan::where('nama_dosen', $user->name)->where('status', 'Selesai')->count();
-        $bimbinganTerbaru = \App\Models\Bimbingan::where('nama_dosen', $user->name)->latest()->take(5)->get();
+    $totalBimbingan   = (clone $base)->count();
+    $menungguReview   = (clone $base)->whereIn('status', ['Menunggu Review', 'Revisi'])->count();
+    $selesaiReview    = (clone $base)->where('status', 'Selesai')->count();
+    $bimbinganTerbaru = (clone $base)->latest()->take(5)->get();
 
-        // Ambil data mahasiswa yang dibimbing oleh dosen yang sedang login
-        $mahasiswas = \App\Models\User::where('role', 'mahasiswa')
-            ->where('dosen_id', $user->id)
-            ->get();
+    // Statistik jumlah dosen/mahasiswa (admin = semua prodi, kaprodi = prodinya)
+    $totalDosen = $totalMahasiswa = 0;
+    if (in_array($user->role, ['admin', 'kaprodi'])) {
+        $scope = fn ($role) => \App\Models\User::where('role', $role)
+            ->when($user->role === 'kaprodi', fn ($q) => $q->where('prodi_id', $user->prodi_id));
+        $totalDosen = $scope('dosen')->count();
+        $totalMahasiswa = $scope('mahasiswa')->count();
     }
-    elseif ($user->role === 'mahasiswa') {
-        $totalBimbingan = \App\Models\Bimbingan::where('nama_mahasiswa', $user->name)->count();
-        $menungguReview = \App\Models\Bimbingan::where('nama_mahasiswa', $user->name)->whereIn('status', ['Menunggu Review', 'Revisi'])->count();
-        $selesaiReview = \App\Models\Bimbingan::where('nama_mahasiswa', $user->name)->where('status', 'Selesai')->count();
-        $bimbinganTerbaru = \App\Models\Bimbingan::where('nama_mahasiswa', $user->name)->latest()->take(5)->get();
-    }
+
+    // Daftar mahasiswa bimbingan milik dosen yang login
+    $mahasiswas = $user->role === 'dosen'
+        ? \App\Models\User::where('role', 'mahasiswa')->where('dosen_id', $user->id)->get()
+        : collect();
 
     return view('dashboard', compact(
         'totalBimbingan', 'totalDosen', 'totalMahasiswa',
@@ -73,8 +61,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-// --- ROUTE ADMIN / KAPRODI ---
-Route::middleware('can:admin')->group(function () {
+// --- ROUTE ADMIN PUSAT / KAPRODI (data discope per prodi di AdminController) ---
+Route::middleware(['auth', 'can:kelola'])->group(function () {
     Route::get('/admin/dosen', [AdminController::class, 'indexDosen'])->name('admin.dosen');
     Route::post('/admin/dosen/simpan', [AdminController::class, 'storeDosen'])->name('admin.dosen.store');
     Route::get('/admin/dosen/edit/{id}', [AdminController::class, 'editDosen'])->name('admin.dosen.edit');

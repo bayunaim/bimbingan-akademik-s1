@@ -21,9 +21,9 @@ class DosenTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
 
     public function array(): array
     {
-        // Sesuaikan contoh isian dengan kolom prodi
+        // Kolom prodi diisi KODE prodi: IKOR / PJKR / PKH
         return [
-            ['Dr. Budi Santoso, M.Or', '198001012005011001', 'budi@binaguna.ac.id', 'Pendidikan Olahraga']
+            ['Dr. Budi Santoso, M.Or', '198001012005011001', 'budi@binaguna.ac.id', 'IKOR']
         ];
     }
 }

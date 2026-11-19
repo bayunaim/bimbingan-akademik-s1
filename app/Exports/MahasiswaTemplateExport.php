@@ -22,7 +22,7 @@ class MahasiswaTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
     public function array(): array
     {
         return [
-            ['Andi Pratama', '211031005', 'andi@binaguna.ac.id', 'Pendidikan Olahraga', '198001012005011001']
+            ['Andi Pratama', '211031005', 'andi@binaguna.ac.id', 'IKOR', '198001012005011001']
         ];
     }
 }

@@ -18,6 +18,11 @@ class AppServiceProvider extends ServiceProvider
             return $user->role === 'admin';
         });
 
+        // Admin pusat ATAU kaprodi: boleh masuk menu kelola dosen/mahasiswa
+        Gate::define('kelola', function ($user) {
+            return in_array($user->role, ['admin', 'kaprodi']);
+        });
+
         Gate::define('dosen', function ($user) {
             return $user->role === 'dosen';
         });
