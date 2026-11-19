@@ -25,7 +25,7 @@ class User extends Authenticatable
         'nomor_induk',
         'role',
         'dosen_id',
-        'prodi', // Tambahan untuk Nama Prodi
+        'prodi_id',
         'foto',  // Tambahan untuk Foto Profil
     ];
 
@@ -51,6 +51,14 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function prodi()
+    {
+        return $this->belongsTo(Prodi::class);
+    }
+
+    public function isAdmin(): bool   { return $this->role === 'admin'; }
+    public function isKaprodi(): bool { return $this->role === 'kaprodi'; }
 
     // Relasi untuk Mahasiswa: Mengambil data Dosen Pembimbingnya
     public function dosenPembimbing()
