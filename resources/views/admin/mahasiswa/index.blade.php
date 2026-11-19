@@ -57,8 +57,15 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Program Studi (Prodi)</label>
-                        <input type="text" name="prodi" placeholder="Contoh: Pendidikan Olahraga"
+                        <select name="prodi_id" id="prodi_id" required
                             class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            @if (auth()->user()->role === 'admin')
+                                <option value="">-- Pilih Prodi --</option>
+                            @endif
+                            @foreach ($prodis as $p)
+                                <option value="{{ $p->id }}">{{ $p->kode }} - {{ $p->nama }}</option>
+                            @endforeach
+                        </select>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Dosen Pembimbing Akademik (PA)</label>
@@ -66,7 +73,8 @@
                             class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
                             <option value="">-- Pilih Dosen PA --</option>
                             @foreach ($dosens as $dosen)
-                                <option value="{{ $dosen->id }}">{{ $dosen->name }}</option>
+                                <option value="{{ $dosen->id }}" data-prodi="{{ $dosen->prodi_id }}">
+                                    {{ $dosen->name }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -125,7 +133,7 @@
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
                                         {{ $mhs->nomor_induk ?? '-' }}</td>
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                        {{ $mhs->prodi ?? '-' }}
+                                        {{ $mhs->prodi->kode ?? '-' }}
                                     </td>
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-indigo-600 font-semibold">
                                         {{ $mhs->dosenPembimbing->name ?? 'Belum di-plot' }}
@@ -162,3 +170,26 @@
         </div>
     </div>
 </x-app-layout>
+
+@push('scripts')
+    <script>
+        // Dosen PA hanya yang sejurusan dengan prodi mahasiswa
+        (function() {
+            const prodi = document.getElementById('prodi_id');
+            const dosen = document.querySelector('select[name="dosen_id"]');
+            if (!prodi || !dosen) return;
+
+            function filter() {
+                Array.from(dosen.options).forEach(function(o) {
+                    if (!o.value) return;
+                    const cocok = !prodi.value || o.dataset.prodi === prodi.value;
+                    o.hidden = !cocok;
+                    o.disabled = !cocok;
+                    if (!cocok && o.selected) dosen.value = '';
+                });
+            }
+            prodi.addEventListener('change', filter);
+            filter();
+        })();
+    </script>
+@endpush

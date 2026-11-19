@@ -43,7 +43,7 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
 
-            @if (Auth::user()->role === 'admin')
+            @if (in_array(Auth::user()->role, ['admin', 'kaprodi']))
                 <div
                     class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex items-center hover:shadow-md transition">
                     <div class="p-4 bg-blue-50 text-blue-600 rounded-xl mr-5"><svg class="w-8 h-8" fill="none"

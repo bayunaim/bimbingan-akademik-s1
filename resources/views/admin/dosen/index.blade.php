@@ -58,8 +58,15 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Program Studi (Prodi)</label>
-                        <input type="text" name="prodi" placeholder="Contoh: Pendidikan Olahraga"
+                        <select name="prodi_id" id="prodi_id" required
                             class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            @if (auth()->user()->role === 'admin')
+                                <option value="">-- Pilih Prodi --</option>
+                            @endif
+                            @foreach ($prodis as $p)
+                                <option value="{{ $p->id }}">{{ $p->kode }} - {{ $p->nama }}</option>
+                            @endforeach
+                        </select>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Password (Opsional)</label>
@@ -116,7 +123,7 @@
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
                                         {{ $dosen->nomor_induk ?? '-' }}</td>
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                        {{ $dosen->prodi ?? '-' }}
+                                        {{ $dosen->prodi->kode ?? '-' }}
                                     </td>
                                     <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-600">{{ $dosen->email }}
                                     </td>

@@ -40,9 +40,17 @@
 
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Program Studi (Prodi)</label>
-                            <input type="text" name="prodi" value="{{ old('prodi', $dosen->prodi) }}"
-                                placeholder="Contoh: Pendidikan Olahraga"
+                            <select name="prodi_id" id="prodi_id" required
                                 class="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                @if (auth()->user()->role === 'admin')
+                                    <option value="">-- Pilih Prodi --</option>
+                                @endif
+                                @foreach ($prodis as $p)
+                                    <option value="{{ $p->id }}"
+                                        {{ old('prodi_id', $dosen->prodi_id) == $p->id ? 'selected' : '' }}>
+                                        {{ $p->kode }} - {{ $p->nama }}</option>
+                                @endforeach
+                            </select>
                         </div>
 
                         <div>
